@@ -36,8 +36,8 @@
  *   indexing.ts      — indexFiles (parallel Phase 1 read, sequential Phase 2 embed)
  *   index.ts         — extension entry point (this file) + re-exports
  */
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import type { AutocompleteItem } from "@mariozechner/pi-tui";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { existsSync } from "node:fs";
 import { resolve, extname, basename, relative } from "node:path";

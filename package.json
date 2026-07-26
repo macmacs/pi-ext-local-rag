@@ -82,7 +82,8 @@
     "turndown": "^7.2.4"
   },
   "peerDependencies": {
-    "@mariozechner/pi-coding-agent": ">=0.60.0"
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
