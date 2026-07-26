@@ -1,0 +1,193 @@
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import Database from "better-sqlite3";
+import { load as loadVec } from "sqlite-vec";
+import { getRagDir, dbFile, legacyIndexFile, ensureDir } from "./store.ts";
+import * as repo from "./repository.ts";
+
+export interface Chunk {
+  id: string;
+  file: string;
+  content: string;
+  lineStart: number;
+  lineEnd: number;
+  hash: string;
+  indexed: string;
+  tokens: number;
+}
+
+interface FileEntry {
+  hash: string;
+  chunks: number;
+  indexed: string;
+  size: number;
+  embedded: boolean;
+}
+
+export interface IndexMeta {
+  chunks: Chunk[];
+  files: Record<string, FileEntry>;
+  lastBuild: string;
+  embeddingModel?: string;
+}
+
+export interface IndexStats {
+  totalChunks: number;
+  totalFiles: number;
+  totalTokens: number;
+  embeddedCount: number;
+  lastBuild: string;
+  embeddingModel: string;
+}
+
+export class RagDatabase {
+  private static _instance: Database.Database | null = null;
+  private constructor() {}
+
+  static get instance(): Database.Database {
+    return RagDatabase._instance ??= RagDatabase.open();
+  }
+
+  static get isOpen(): boolean { return RagDatabase._instance !== null; }
+
+  static close(): void {
+    const db = RagDatabase._instance;
+    RagDatabase._instance = null;
+    try {
+      db?.close();
+    } catch (err) {
+      process.stderr.write(`[rag] closeDb() failed: ${(err as Error).message}\n`);
+    }
+  }
+
+  static open(ragDir?: string): Database.Database {
+    const dir = ragDir ?? getRagDir();
+    ensureDir(dir);
+    const path = dbFile(dir);
+    const db = new Database(path);
+    db.pragma("journal_mode = WAL");
+    db.pragma("foreign_keys = ON");
+    loadVec(db);
+    repo.initSchema(db);
+
+    const legacyPath = legacyIndexFile(dir);
+    if (existsSync(legacyPath)) {
+      if (repo.countChunksTotal(db) === 0) {
+        migrateFromJson(db, legacyPath);
+      }
+    }
+
+    return db;
+  }
+
+  static getFreshDbConn(ragDir?: string): Database.Database & Disposable {
+    const db = RagDatabase.open(ragDir);
+    return Object.assign(db, {
+      [Symbol.dispose]: () => db.close(),
+    });
+  }
+}
+
+export const getDbConn   = () => RagDatabase.instance;
+export const closeDbConn = () => { RagDatabase.close(); };
+
+// ── Backward-compat aliases ──────────────────────────────────────────────
+// The DB layer was refactored to the class-based `RagDatabase` API
+// (getDbConn / closeDbConn). `index.ts` and downstream consumers still import
+// the older names. `openDb`/`getDb` return a FRESH, caller-owned connection
+// because those call sites `.close()` the handle when done — mapping them to
+// the shared singleton would close it out from under every later caller.
+export const openDb  = () => RagDatabase.getFreshDbConn();
+export const getDb   = () => RagDatabase.getFreshDbConn();
+export const closeDb = () => { RagDatabase.close(); };
+export { float32ToBuffer } from "./repository.ts";
+
+/**
+ * Returns a brand-new, throwaway DB connection. **Bypasses the singleton** —
+ * the caller is responsible for closing it. Use `getDbConn()` for normal access.
+ */
+export const getFreshDbConn = (dir?: string) => RagDatabase.getFreshDbConn(dir);
+
+export function initSchema(db: Database.Database) {
+  repo.initSchema(db);
+}
+
+function migrateFromJson(db: Database.Database, jsonPath: string): void {
+  let data: IndexMeta;
+  try {
+    data = JSON.parse(readFileSync(jsonPath, "utf-8"));
+  } catch { return; }
+
+  if (!data.chunks || data.chunks.length === 0) {
+    try { unlinkSync(jsonPath); } catch {}
+    return;
+  }
+
+  const tx = db.transaction(() => {
+    for (const c of data.chunks) {
+      repo.insertChunk(db, {
+        id: c.id, filePath: c.file, content: c.content,
+        lineStart: c.lineStart, lineEnd: c.lineEnd,
+        hash: c.hash, indexedAt: c.indexed, tokens: c.tokens,
+      });
+    }
+
+    for (const [fp, info] of Object.entries(data.files || {})) {
+      repo.replaceFile(db, fp, info.hash, info.chunks, info.indexed, info.size, info.embedded);
+    }
+
+    if (data.lastBuild) {
+      repo.setMetadata(db, repo.MetadataKey.LastBuild, data.lastBuild);
+    }
+    if (data.embeddingModel) {
+      repo.setMetadata(db, repo.MetadataKey.EmbeddingModel, data.embeddingModel);
+    }
+  });
+
+  tx();
+  try { unlinkSync(jsonPath); } catch {}
+}
+
+export function getIndexStats(db?: Database.Database): IndexStats {
+  const dbConn = db ?? getDbConn();
+  const { totalChunks, totalTokens } = repo.getChunkStats(dbConn);
+
+  return {
+    totalChunks: totalChunks,
+    totalFiles: repo.countFiles(dbConn),
+    totalTokens: totalTokens,
+    embeddedCount: repo.getEmbeddedCount(dbConn),
+    lastBuild: repo.getMetadata(dbConn, repo.MetadataKey.LastBuild) ?? "",
+    embeddingModel: repo.getMetadata(dbConn, repo.MetadataKey.EmbeddingModel) ?? "",
+  };
+}
+
+/** No-op shim — JSON-era callers (and tests) compile against this. SQLite
+ *  writes are committed by indexFiles' transactions; there is no separate
+ *  save step. Kept on the public surface to avoid breaking external imports. */
+export function saveIndex(_index: IndexMeta) { /* writes are transactional in indexFiles */ }
+
+export function loadIndex(): IndexMeta {
+  const db = getDbConn();
+  const chunks = repo.getAllChunks(db) as Chunk[];
+
+  const filesRaw = repo.listFiles(db);
+  const files: IndexMeta["files"] = {};
+  for (const f of filesRaw) {
+    files[f.path] = { hash: f.hash, chunks: f.chunks, indexed: f.indexed, size: f.size, embedded: !!f.embedded };
+  }
+
+  return {
+    chunks, files,
+    lastBuild: repo.getMetadata(db, repo.MetadataKey.LastBuild) ?? "",
+    embeddingModel: repo.getMetadata(db, repo.MetadataKey.EmbeddingModel),
+  };
+}
+
+export function getEmbeddedCount(): number {
+  const db = getDbConn();
+  return repo.getEmbeddedCount(db);
+}
+
+export function getIndexedFiles(): repo.FileRow[] {
+  return repo.listFiles(getDbConn());
+}

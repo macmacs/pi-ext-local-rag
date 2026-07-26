@@ -1,0 +1,9 @@
+node_modules/
+.pi/
+*.js
+*.d.ts
+!types/*.d.ts
+*.map
+.DS_Store
+coverage/
+FORK_WORK.md
