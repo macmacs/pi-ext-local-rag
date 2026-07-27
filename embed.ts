@@ -79,15 +79,51 @@ export async function embed(text: string): Promise<number[]> {
  */
 const yield_ = () => new Promise<void>(r => setTimeout(r, 0));
 
-/** Default batch size for a single ONNX forward pass. */
+/** Upper bound on texts per forward pass; the memory budget below usually bites first. */
 export const BATCH_SIZE = 64;
+
+/** Fallback sequence length when the tokenizer can't be consulted (all-MiniLM-L6-v2 truncates at 512). */
+const MAX_SEQ_LEN = 512;
+
+/**
+ * Peak RSS of one forward pass is dominated by the attention score matrices,
+ * which scale with `batchSize x seqLen^2` - seqLen being the *longest* text in
+ * the batch, since transformers.js pads the whole batch to it.
+ *
+ * A flat batch of 64 full-length chunks costs ~4.3 GB on top of the ~290 MB
+ * baseline, which OOM-kills the host agent on a small machine - and buys
+ * nothing: on a CPU-bound box throughput is flat at ~158 ms/chunk from batch 1
+ * to batch 64. So cap the batch by a memory budget instead of a count, which
+ * still lets short texts (code, prose) batch wide.
+ */
+const BYTES_PER_ITEM_TOKEN_SQ = 250;
+
+/** Memory a single forward pass may use, above baseline. */
+const EMBED_BUDGET_BYTES = Math.max(32, Number(process.env.PI_RAG_EMBED_BUDGET_MB) || 384) * 1024 * 1024;
+
+/** How many texts of `tokens` length fit one forward pass within the budget. Exported for tests. */
+export function batchLimitFor(tokens: number): number {
+  const fit = Math.floor(EMBED_BUDGET_BYTES / (BYTES_PER_ITEM_TOKEN_SQ * tokens * tokens));
+  return Math.min(BATCH_SIZE, Math.max(1, fit));
+}
+
+/** Token count after the pipeline's own truncation, so the budget sees real sequence lengths. */
+function tokenLength(embedder: any, text: string): number {
+  const cap = embedder?.tokenizer?.model_max_length || MAX_SEQ_LEN;
+  try {
+    return Math.min(cap, embedder.tokenizer.encode(text).length) || 1;
+  } catch {
+    return cap; // Unknown length - assume worst case, i.e. the smallest batch.
+  }
+}
 
 /**
  * Embed `texts` using true batched ONNX inference.
  *
- * The model is called once per batch of up to `BATCH_SIZE` texts rather than
- * once per text, giving a ~BATCH_SIZE× speedup on CPU.  The output Tensor has
- * dims [batchSize, VECTOR_DIM]; we slice it into per-text arrays.
+ * Batches are assembled greedily up to `EMBED_BUDGET_BYTES` (and never more
+ * than `BATCH_SIZE` texts), so one long chunk shrinks its batch instead of
+ * blowing up the process. The output Tensor has dims [batchSize, VECTOR_DIM];
+ * we slice it into per-text arrays.
  *
  * `onProgress` is fired after each batch with the cumulative count so the TUI
  * can render a smooth progress bar (same contract as before).
@@ -99,11 +135,21 @@ export async function embedBatch(
   if (texts.length === 0) return [];
   const embedder = await getEmbedder();
   const results: number[][] = new Array(texts.length);
+  const lengths = texts.map(t => tokenLength(embedder, t));
 
-  for (let start = 0; start < texts.length; start += BATCH_SIZE) {
-    const batch = texts.slice(start, start + BATCH_SIZE);
-    // Pass the whole batch in a single forward pass — the model returns a
-    // Tensor with dims [batchSize, VECTOR_DIM].
+  let start = 0;
+  while (start < texts.length) {
+    // Grow the batch while the longest member still leaves room for one more.
+    let end = start + 1;
+    let seqLen = lengths[start];
+    while (end < texts.length) {
+      const grown = Math.max(seqLen, lengths[end]);
+      if (end + 1 - start > batchLimitFor(grown)) break;
+      seqLen = grown;
+      end++;
+    }
+
+    const batch = texts.slice(start, end);
     const output = await embedder(batch, { pooling: "mean", normalize: true });
     const flat = output.data as Float32Array;
     const dim = flat.length / batch.length; // should equal VECTOR_DIM (384)
@@ -112,7 +158,8 @@ export async function embedBatch(
       results[start + j] = Array.from(flat.subarray(j * dim, (j + 1) * dim));
     }
 
-    onProgress?.(Math.min(start + batch.length, texts.length), texts.length);
+    start = end;
+    onProgress?.(start, texts.length);
     // Yield after each batch so the TUI can re-render before the next pass.
     await yield_();
   }

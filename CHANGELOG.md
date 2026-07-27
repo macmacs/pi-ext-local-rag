@@ -8,6 +8,11 @@
 - **Fixed `peerDependencies`**: declared `typebox` where the code imports `@sinclair/typebox`, and omitted `@earendil-works/pi-tui` entirely. With both missing, `index.ts` failed to import, so `__tests__/index.test.ts` and `__tests__/embedding.test.ts` could not run at all - two of four test files were silently dead. The suite runs and `npm run typecheck` is clean.
 - **Fixed: `search.ts` imported the `Chunk` type as a value**, which breaks Node's TypeScript type-stripping (`node --experimental-strip-types`) even though bundlers tolerate it.
 - `collectFromTracked` / `collectFromTrackedAsync` now take just the `trackedPaths` + `excludePatterns` slice of the config rather than a whole `RagConfig`, which is all they ever read.
+- **Fixed: indexing could OOM-kill the host agent.** Embedding used a flat batch of 64 texts, and peak RSS scales with `batchSize x seqLen^2` (transformers.js pads every batch to its longest member), so a batch of full-length chunks allocated ~4.6 GB of attention scratch. On a 6 GB machine the rebuild died mid-run, after phase 1 had already deleted the old chunks - leaving an index with file rows but zero chunks, i.e. a silently empty RAG. `embedBatch` now sizes each batch against a memory budget (`PI_RAG_EMBED_BUDGET_MB`, default 384): a full 262-file / 1719-chunk rebuild peaks at ~1.0 GB instead of ~4.9 GB, and runs slightly faster because short chunks no longer get padded up to a long one.
+
+### Known environment quirk
+
+On a host whose CPU affinity is restricted (containers, LXC, `taskset`), onnxruntime-node logs `pthread_setaffinity_np failed ... Specify the number of threads explicitly` on the first inference. It is cosmetic - ORT falls back to unpinned threads and inference proceeds normally. It cannot be silenced from JS at onnxruntime-node 1.14: it comes from the global ORT thread pool, and neither `intraOpNumThreads`, `enableCpuMemArena`, `ort.env.logLevel` nor `ORT_LOG_SEVERITY_LEVEL` suppresses it.
 
 ## 0.4.1
 

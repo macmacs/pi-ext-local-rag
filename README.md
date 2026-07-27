@@ -166,6 +166,13 @@ Auto-injection is on by default. Config lives in `<ragDir>/config.json`:
 | `trackedPaths` | `[]` | Absolute paths that `/rag rebuild`/`refresh` re-walk |
 | `excludePatterns` | lock files, `*.min.js/css`, `*.map` | Gitignore-style patterns skipped when walking. Seeded with machine-generated noise (e.g. `package-lock.json`) so it never pollutes search. Add more with `/rag exclude <pattern>`. |
 
+Environment overrides:
+
+| Variable | Default | Description |
+|---|---|---|
+| `PI_RAG_DIR` / `PI_RAG_LEGACY_DIR` | auto-resolved | Where the index and config live |
+| `PI_RAG_EMBED_BUDGET_MB` | `384` | Memory one embedding forward pass may use. Batch size is derived from it, so lower this on a memory-tight host and raise it on a large one. |
+
 ## Testing
 
 ```bash
