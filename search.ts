@@ -1,7 +1,8 @@
 import Database from "better-sqlite3";
 import { embed } from "./embed.ts";
-import { getDbConn } from "./db.ts";
-import { Chunk } from "./db.ts";
+// `Chunk` is a type: importing it as a value breaks Node's TypeScript
+// type-stripping, which cannot know to erase the specifier at runtime.
+import { getDbConn, type Chunk } from "./db.ts";
 import * as repo from "./repository.ts";
 
 export interface ScoredChunk {

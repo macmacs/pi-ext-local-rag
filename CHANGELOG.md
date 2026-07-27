@@ -6,6 +6,7 @@
 - **Fixed: valid PDFs under ~64 KB failed with "bad XRef entry".** pdfjs resolves its sub-streams against `bytes.buffer` without honouring `byteOffset`, so a Node `Buffer` allocated from the shared pool made it read object data out of a neighbouring buffer. `extractText` now passes a standalone `Uint8Array`.
 - **PDFs that fail to parse fall through to OCR** instead of being dropped from the index, and report the real parser message rather than "not found or unreadable".
 - **Fixed `peerDependencies`**: declared `typebox` where the code imports `@sinclair/typebox`, and omitted `@earendil-works/pi-tui` entirely. With both missing, `index.ts` failed to import, so `__tests__/index.test.ts` and `__tests__/embedding.test.ts` could not run at all - two of four test files were silently dead. The suite runs and `npm run typecheck` is clean.
+- **Fixed: `search.ts` imported the `Chunk` type as a value**, which breaks Node's TypeScript type-stripping (`node --experimental-strip-types`) even though bundlers tolerate it.
 
 ## 0.4.1
 
