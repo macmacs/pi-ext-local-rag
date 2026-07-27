@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **Fixed: a malformed PDF could kill the host agent process.** pdfjs rejects detached promises for per-page and per-XObject parse tasks that `pdf-parse` never awaits, so a corrupt content stream crashed the process with `FormatError: bad XRef entry` (or `Bad encoding in flate stream`) even though `extractText` already ran inside a `try`/`catch`. `extractText` now installs a scoped `unhandledRejection` guard for the duration of a parse that drops pdfjs-originated rejections and rethrows everything else, so genuine host bugs still crash as before.
+- **Fixed: valid PDFs under ~64 KB failed with "bad XRef entry".** pdfjs resolves its sub-streams against `bytes.buffer` without honouring `byteOffset`, so a Node `Buffer` allocated from the shared pool made it read object data out of a neighbouring buffer. `extractText` now passes a standalone `Uint8Array`.
+- **PDFs that fail to parse fall through to OCR** instead of being dropped from the index, and report the real parser message rather than "not found or unreadable".
+
 ## 0.4.1
 
 - **Docs refresh**: README rewritten for 0.4.0 feature set — SQLite/FTS5/sqlite-vec storage, PDF/DOCX/HTML extraction, OCR fallback, per-project store, tracked paths + exclude patterns, 24 h auto-refresh, trailing-message auto-injection. Commands table expanded with `/rag find`, `/rag refresh`, `/rag rebuild --force`, `/rag exclude`, `/rag help`. Optional OCR install instructions (`brew install poppler tesseract tesseract-lang` / `apt install poppler-utils tesseract-ocr ...`). New "Testing" section noting `SKIP_EMBEDDING_TESTS` and the tesseract-absent OCR skip.

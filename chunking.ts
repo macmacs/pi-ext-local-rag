@@ -196,6 +196,75 @@ export function isExcludedByConfig(file: string, roots: string[], excludePattern
 // export exists only as a placeholder at the outer module level). Filtering
 // console.log for the known pdfjs prefixes is the only reliable approach.
 const PDFJS_LOG_PREFIX = /^(Warning|Info|Deprecated API usage):/;
+
+// Malformed PDFs also make pdfjs reject *detached* promises — per-page and
+// per-XObject parse tasks that pdf-parse starts but never awaits. Those
+// rejections have no owner, so a try/catch around pdf() cannot see them and
+// Node's default `--unhandled-rejections=throw` kills the whole agent process
+// with e.g. `FormatError: bad XRef entry` while pdf() itself resolves happily.
+// The only place to intercept them is the process-level event, so while a PDF
+// parse is in flight we install a listener that drops rejections originating
+// in the bundled pdfjs and rethrows everything else to preserve default
+// crash-on-unhandled semantics for the host.
+const PDFJS_STACK = /[\\/]pdf-parse[\\/]lib[\\/]pdf\.js[\\/]/;
+const PDFJS_ERROR_NAMES = new Set([
+  "FormatError", "InvalidPDFException", "MissingPDFException", "MissingDataException",
+  "UnexpectedResponseException", "UnknownErrorException", "XRefParseException",
+  "XRefEntryException", "PasswordException", "AbortException",
+]);
+// Detached rejections surface a tick or more after pdf() settles, so the
+// listener has to outlive the call that provoked them.
+const PDFJS_GUARD_GRACE_MS = 10_000;
+
+let _pdfjsGuardDepth = 0;
+let _pdfjsGuardTimer: ReturnType<typeof setTimeout> | undefined;
+let _pdfjsGuardListener: ((reason: unknown) => void) | undefined;
+let _pdfjsSwallowedLogged = false;
+/** Count of pdfjs rejections dropped by the guard. Exported for tests. */
+export let pdfjsSwallowedRejections = 0;
+/** Count of PDFs that failed to parse and fell through to OCR. Exported for tests. */
+export let pdfParseFailures = 0;
+
+function isPdfjsRejection(reason: unknown): boolean {
+  if (!(reason instanceof Error)) return false;
+  if (typeof reason.stack === "string" && PDFJS_STACK.test(reason.stack)) return true;
+  return PDFJS_ERROR_NAMES.has(reason.name);
+}
+
+function acquirePdfjsGuard(): void {
+  _pdfjsGuardDepth++;
+  if (_pdfjsGuardTimer) { clearTimeout(_pdfjsGuardTimer); _pdfjsGuardTimer = undefined; }
+  if (_pdfjsGuardListener) return;
+  _pdfjsGuardListener = (reason: unknown) => {
+    if (isPdfjsRejection(reason)) {
+      pdfjsSwallowedRejections++;
+      if (!_pdfjsSwallowedLogged) {
+        _pdfjsSwallowedLogged = true;
+        process.stderr.write(
+          `\r\x1b[2K[rag] malformed PDF internals detected; ignoring parser errors and indexing whatever text was recovered\n`
+        );
+      }
+      return;
+    }
+    // Not ours. Adding any listener disables Node's default crash, so if we are
+    // the only listener we have to reproduce it.
+    if (process.listenerCount("unhandledRejection") === 1) throw reason;
+  };
+  process.on("unhandledRejection", _pdfjsGuardListener);
+}
+
+function releasePdfjsGuard(): void {
+  if (--_pdfjsGuardDepth > 0) return;
+  _pdfjsGuardDepth = 0;
+  _pdfjsGuardTimer = setTimeout(() => {
+    _pdfjsGuardTimer = undefined;
+    if (_pdfjsGuardDepth > 0 || !_pdfjsGuardListener) return;
+    process.off("unhandledRejection", _pdfjsGuardListener);
+    _pdfjsGuardListener = undefined;
+  }, PDFJS_GUARD_GRACE_MS);
+  _pdfjsGuardTimer.unref?.();
+}
+
 async function withPdfjsSilenced<T>(fn: () => Promise<T>): Promise<T> {
   const origLog = console.log;
   console.log = (...args: unknown[]) => {
@@ -203,10 +272,12 @@ async function withPdfjsSilenced<T>(fn: () => Promise<T>): Promise<T> {
     if (typeof first === "string" && PDFJS_LOG_PREFIX.test(first)) return;
     origLog(...args);
   };
+  acquirePdfjsGuard();
   try {
     return await fn();
   } finally {
     console.log = origLog;
+    releasePdfjsGuard();
   }
 }
 
@@ -279,7 +350,23 @@ export async function extractText(fp: string): Promise<{ text: string; hash: str
   if (ext === ".pdf") {
     const buf = readFileSync(fp);
     const { default: pdf } = await import("pdf-parse/lib/pdf-parse.js");
-    const data = await withPdfjsSilenced(() => pdf(buf));
+    // Hand pdfjs a plain Uint8Array, never the Node Buffer. pdfjs derives its
+    // sub-streams from `bytes.buffer` and ignores `byteOffset`, so a Buffer
+    // that sits inside Node's shared allocation pool (anything under ~64 KB,
+    // which is most single-page documents) makes it read object data from a
+    // neighbouring buffer and fail a perfectly valid file with "bad XRef entry".
+    const bytes = new Uint8Array(buf);
+    // A PDF broken badly enough to fail outright (bad xref, truncated file) is
+    // still worth an OCR attempt — pdftoppm is far more forgiving than pdfjs —
+    // so treat the failure as "no text, one page" and fall through to that path.
+    let data: { text: string; numpages?: number };
+    try {
+      data = await withPdfjsSilenced(() => pdf(bytes));
+    } catch (e) {
+      pdfParseFailures++;
+      process.stderr.write(`\r\x1b[2K[rag] ${basename(fp)}: PDF parse failed (${(e as Error).message}), trying OCR\n`);
+      data = { text: "", numpages: 1 };
+    }
     let text = data.text;
     if (isSparsePdfText(text, data.numpages ?? 1)) {
       const tools = getOcrTooling();
