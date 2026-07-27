@@ -83,7 +83,8 @@
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
-    "typebox": "*"
+    "@earendil-works/pi-tui": "*",
+    "@sinclair/typebox": "*"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
