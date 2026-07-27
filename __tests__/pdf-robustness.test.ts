@@ -112,12 +112,12 @@ describe("extractText on PDFs", () => {
     // The rejection surfaces after pdf() has already resolved; give it a turn.
     await new Promise(res => setTimeout(res, 500));
     // If this stops incrementing, either the fixture no longer provokes pdfjs
-    // or pdfjs stopped leaking — check which before touching the guard.
+    // or pdfjs stopped leaking - check which before touching the guard.
     expect(pdfjsSwallowedRejections).toBeGreaterThan(before);
   });
 
   // The guard cannot stop other unhandledRejection listeners, and its whole
-  // effect is on a process where it is the only one — so the crash it prevents
+  // effect is on a process where it is the only one - so the crash it prevents
   // is only observable from outside. Before the guard, `bad-stream.pdf` took
   // the host down with `FormatError: Bad encoding in flate stream`.
   it("does not take the host process down, and still lets host bugs crash it", () => {
