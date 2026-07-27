@@ -9,6 +9,9 @@ import { loadConfig, resolveExtensions, type RagConfig } from "./config.ts";
 
 const yield_ = () => new Promise<void>(r => setTimeout(r, 0));
 
+/** The slice of RagConfig the directory walkers actually consult. */
+type TrackedPathsConfig = Pick<RagConfig, "trackedPaths" | "excludePatterns">;
+
 function stderrProgress(msg: string) { process.stderr.write(`\r\x1b[2K${msg}`); }
 
 export function sha256(data: string): string {
@@ -89,7 +92,8 @@ export function collectFiles(
   return files;
 }
 
-export function collectFromTracked(cfg: RagConfig): string[] {
+/** Takes only the fields it walks, so callers (and tests) need not build a whole RagConfig. */
+export function collectFromTracked(cfg: TrackedPathsConfig): string[] {
   const out = new Set<string>();
   for (const p of cfg.trackedPaths) {
     if (!existsSync(p)) continue;
@@ -167,7 +171,7 @@ export async function collectFilesAsync(
   return files;
 }
 
-export async function collectFromTrackedAsync(cfg: RagConfig): Promise<string[]> {
+export async function collectFromTrackedAsync(cfg: TrackedPathsConfig): Promise<string[]> {
   const out = new Set<string>();
   for (const p of cfg.trackedPaths) {
     if (!existsSync(p)) continue;

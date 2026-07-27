@@ -7,6 +7,7 @@
 - **PDFs that fail to parse fall through to OCR** instead of being dropped from the index, and report the real parser message rather than "not found or unreadable".
 - **Fixed `peerDependencies`**: declared `typebox` where the code imports `@sinclair/typebox`, and omitted `@earendil-works/pi-tui` entirely. With both missing, `index.ts` failed to import, so `__tests__/index.test.ts` and `__tests__/embedding.test.ts` could not run at all - two of four test files were silently dead. The suite runs and `npm run typecheck` is clean.
 - **Fixed: `search.ts` imported the `Chunk` type as a value**, which breaks Node's TypeScript type-stripping (`node --experimental-strip-types`) even though bundlers tolerate it.
+- `collectFromTracked` / `collectFromTrackedAsync` now take just the `trackedPaths` + `excludePatterns` slice of the config rather than a whole `RagConfig`, which is all they ever read.
 
 ## 0.4.1
 
