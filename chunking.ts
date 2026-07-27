@@ -291,7 +291,15 @@ type OcrTooling = { available: false } | { available: true; langs: string };
 let _ocrTooling: OcrTooling | undefined;
 let _ocrUnavailableLogged = false;
 
-/** One-shot probe for system pdftoppm + tesseract. Caches the result. */
+/**
+ * One-shot probe for system pdftoppm + tesseract. Caches the result.
+ *
+ * The languages come from `ocrLanguages` in the config, in preference order -
+ * tesseract weights the first entry of a `deu+eng` chain most heavily, and
+ * running German scans under `-l eng` mangles umlauts badly enough to poison
+ * the index. Languages with no installed traineddata are dropped rather than
+ * passed through, since tesseract exits non-zero on an unknown `-l`.
+ */
 export function getOcrTooling(): OcrTooling {
   if (_ocrTooling) return _ocrTooling;
   const pdftoppm = spawnSync("pdftoppm", ["-v"]);
@@ -300,8 +308,18 @@ export function getOcrTooling(): OcrTooling {
   // tesseract prints langs on stderr in some builds, stdout in others.
   const out = `${tess.stdout || ""}\n${tess.stderr || ""}`;
   const have = new Set(out.split(/\r?\n/).map(s => s.trim()).filter(Boolean));
-  const wanted = ["jpn", "eng"].filter(l => have.has(l));
-  if (!wanted.length) return (_ocrTooling = { available: false });
+
+  let configured: string[];
+  try { configured = loadConfig().ocrLanguages; } catch { configured = ["eng"]; }
+  const wanted = configured.filter(l => have.has(l));
+  if (!wanted.length) {
+    if (configured.length && have.size) {
+      process.stderr.write(
+        `\r\x1b[2K[rag] OCR: no traineddata for ${configured.join(", ")} - install it (e.g. apt install tesseract-ocr-deu) or fix ocrLanguages\n`
+      );
+    }
+    return (_ocrTooling = { available: false });
+  }
   return (_ocrTooling = { available: true, langs: wanted.join("+") });
 }
 
@@ -380,7 +398,7 @@ export async function extractText(fp: string): Promise<{ text: string; hash: str
       } else if (!_ocrUnavailableLogged) {
         _ocrUnavailableLogged = true;
         process.stderr.write(
-          `\r\x1b[2K[rag] OCR unavailable: install pdftoppm + tesseract (with jpn/eng traineddata) to index image PDFs\n`
+          `\r\x1b[2K[rag] OCR unavailable: install pdftoppm + tesseract (with traineddata for your ocrLanguages) to index image PDFs\n`
         );
       }
     }

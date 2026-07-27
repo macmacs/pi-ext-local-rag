@@ -32,6 +32,7 @@ export interface RagConfig {
   excludeExtensions: string[]; // extensions to drop from the default set
   trackedPaths: string[];      // absolute paths previously passed to /rag index
   excludePatterns: string[];   // gitignore-style path patterns
+  ocrLanguages: string[];      // tesseract langs for scanned PDFs, best match first (e.g. ["deu", "eng"])
 }
 
 export function defaultConfig(): RagConfig {
@@ -44,6 +45,11 @@ export function defaultConfig(): RagConfig {
     ragEnabled: true, ragTopK: 5, ragScoreThreshold: 0.35, ragAlpha: 0.4,
     extraExtensions: [], excludeExtensions: [],
     trackedPaths: [], excludePatterns: [...DEFAULT_EXCLUDE_PATTERNS],
+    // OCR quality collapses when the language is wrong (German umlauts and
+    // ligatures come out as noise under `-l eng`). Set this to the languages
+    // your documents are actually in; entries with no installed traineddata
+    // are dropped.
+    ocrLanguages: ["eng"],
   };
 }
 

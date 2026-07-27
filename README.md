@@ -25,14 +25,14 @@ Or via git:
 pi install git:github.com/vahidkowsari/pi-local-rag
 ```
 
-Optional: install `pdftoppm` (poppler) + `tesseract` with `eng`/`jpn` traineddata to enable OCR fallback for image-only PDFs.
+Optional: install `pdftoppm` (poppler) + `tesseract` with traineddata for the languages your documents are in (see `ocrLanguages`) to enable OCR fallback for image-only PDFs.
 
 ```bash
 # macOS
 brew install poppler tesseract tesseract-lang
 
 # Debian/Ubuntu
-apt install poppler-utils tesseract-ocr tesseract-ocr-eng tesseract-ocr-jpn
+apt install poppler-utils tesseract-ocr tesseract-ocr-eng   # add tesseract-ocr-deu etc. as needed
 ```
 
 The OCR fallback is silent when these tools aren't installed (logs one stderr hint on the first image-only PDF encountered).
@@ -165,6 +165,7 @@ Auto-injection is on by default. Config lives in `<ragDir>/config.json`:
 | `excludeExtensions` | `[]` | Default extensions to skip |
 | `trackedPaths` | `[]` | Absolute paths that `/rag rebuild`/`refresh` re-walk |
 | `excludePatterns` | lock files, `*.min.js/css`, `*.map` | Gitignore-style patterns skipped when walking. Seeded with machine-generated noise (e.g. `package-lock.json`) so it never pollutes search. Add more with `/rag exclude <pattern>`. |
+| `ocrLanguages` | `["eng"]` | Tesseract languages for scanned PDFs, best match first (e.g. `["deu", "eng"]`). Getting this wrong is expensive: German scans OCR'd as English lose every umlaut. Needs the matching traineddata installed (`apt install tesseract-ocr-deu`); entries without it are dropped. |
 
 Environment overrides:
 

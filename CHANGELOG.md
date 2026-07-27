@@ -9,6 +9,7 @@
 - **Fixed: `search.ts` imported the `Chunk` type as a value**, which breaks Node's TypeScript type-stripping (`node --experimental-strip-types`) even though bundlers tolerate it.
 - `collectFromTracked` / `collectFromTrackedAsync` now take just the `trackedPaths` + `excludePatterns` slice of the config rather than a whole `RagConfig`, which is all they ever read.
 - **Fixed: indexing could OOM-kill the host agent.** Embedding used a flat batch of 64 texts, and peak RSS scales with `batchSize x seqLen^2` (transformers.js pads every batch to its longest member), so a batch of full-length chunks allocated ~4.6 GB of attention scratch. On a 6 GB machine the rebuild died mid-run, after phase 1 had already deleted the old chunks - leaving an index with file rows but zero chunks, i.e. a silently empty RAG. `embedBatch` now sizes each batch against a memory budget (`PI_RAG_EMBED_BUDGET_MB`, default 384): a full 262-file / 1719-chunk rebuild peaks at ~1.0 GB instead of ~4.9 GB, and runs slightly faster because short chunks no longer get padded up to a long one.
+- **OCR language is configurable** via `ocrLanguages` (default `["eng"]`, first entry weighted most heavily by tesseract). The list was previously hardcoded to `jpn+eng`, so a German archive was OCR'd as English and lost every umlaut - measured across three scanned documents, `-l eng` recovered 0 umlauts where `-l deu+eng` recovered 28-53. Languages with no installed traineddata are dropped, with a message naming the missing ones.
 
 ### Known environment quirk
 

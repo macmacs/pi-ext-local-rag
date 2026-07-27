@@ -967,6 +967,7 @@ describe("Storage (loadConfig/saveConfig/loadIndex/saveIndex/ensureDir)", () => 
     expect(cfg.excludeExtensions).toEqual([]);
     expect(cfg.trackedPaths).toEqual([]);
     expect(cfg.excludePatterns).toContain("**/package-lock.json");
+    expect(cfg.ocrLanguages).toEqual(["eng"]);
   });
 
   it("saveConfig / loadConfig round-trip persists every field", () => {
@@ -979,6 +980,7 @@ describe("Storage (loadConfig/saveConfig/loadIndex/saveIndex/ensureDir)", () => 
       excludeExtensions: [".md"],
       trackedPaths: ["/tmp/proj-a", "/tmp/proj-b"],
       excludePatterns: ["*.log", "node_modules/"],
+      ocrLanguages: ["deu", "eng"],
     };
     saveConfig(written);
     expect(loadConfig()).toEqual(written);
