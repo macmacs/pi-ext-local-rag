@@ -1,9 +1,29 @@
 import { EMBEDDING_MODEL } from "./constants.ts";
+import { loadConfig } from "./config.ts";
 import tls from "node:tls";
 import { existsSync, readFileSync } from "node:fs";
 
 let _pipeline: any = null;
+let _pipelineModel: string | null = null;
 let _caTrustEnsured = false;
+
+/** The embedding model in force: config wins, falling back to the shipped default. */
+export function activeEmbeddingModel(): string {
+  try { return loadConfig().embeddingModel || EMBEDDING_MODEL; } catch { return EMBEDDING_MODEL; }
+}
+
+/**
+ * Retrieval models in the E5 family are trained with asymmetric prefixes and
+ * lose most of their advantage without them: the query side must be tagged
+ * `query: ` and the indexed side `passage: `. Everything else embeds both
+ * sides identically.
+ */
+export type EmbedKind = "query" | "passage";
+
+/** Exported for tests: picking the wrong side here silently degrades retrieval. */
+export function prefixFor(model: string, kind: EmbedKind): string {
+  return /e5/i.test(model) ? `${kind}: ` : "";
+}
 
 /**
  * Some environments (corporate TLS interception, custom proxies) present a
@@ -59,16 +79,20 @@ function ensureCaTrust(): void {
 }
 
 async function getEmbedder() {
-  if (_pipeline) return _pipeline;
+  const model = activeEmbeddingModel();
+  // Reload if the configured model changed under a long-lived process.
+  if (_pipeline && _pipelineModel === model) return _pipeline;
   ensureCaTrust();
   const { pipeline } = await import("@xenova/transformers");
-  _pipeline = await pipeline("feature-extraction", EMBEDDING_MODEL);
+  _pipeline = await pipeline("feature-extraction", model);
+  _pipelineModel = model;
   return _pipeline;
 }
 
-export async function embed(text: string): Promise<number[]> {
+export async function embed(text: string, kind: EmbedKind = "query"): Promise<number[]> {
   const embedder = await getEmbedder();
-  const output = await embedder(text, { pooling: "mean", normalize: true });
+  const prefixed = prefixFor(_pipelineModel ?? "", kind) + text;
+  const output = await embedder(prefixed, { pooling: "mean", normalize: true });
   return Array.from(output.data as Float32Array);
 }
 
@@ -95,15 +119,33 @@ const MAX_SEQ_LEN = 512;
  * nothing: on a CPU-bound box throughput is flat at ~158 ms/chunk from batch 1
  * to batch 64. So cap the batch by a memory budget instead of a count, which
  * still lets short texts (code, prose) batch wide.
+ *
+ * The cost per (item x token^2) is per-model. Measured on onnxruntime-node:
+ * ~250 bytes for all-MiniLM-L6-v2 (6 layers, 384-dim) and ~500 for
+ * multilingual-e5-small (12 layers, 384-dim), i.e. proportional to depth. The
+ * width term is inferred rather than measured, so it is deliberately
+ * pessimistic - over-estimating only costs throughput, under-estimating costs
+ * the whole process.
  */
-const BYTES_PER_ITEM_TOKEN_SQ = 250;
+const BASE_BYTES_PER_ITEM_TOKEN_SQ = 250;
+const BASE_LAYERS = 6, BASE_HIDDEN = 384;
 
 /** Memory a single forward pass may use, above baseline. */
 const EMBED_BUDGET_BYTES = Math.max(32, Number(process.env.PI_RAG_EMBED_BUDGET_MB) || 384) * 1024 * 1024;
 
+let _bytesPerItemTokenSq = BASE_BYTES_PER_ITEM_TOKEN_SQ;
+
+/** Re-derive the memory cost from the loaded model's shape. */
+function calibrate(embedder: any): void {
+  const cfg = embedder?.model?.config;
+  const layers = Number(cfg?.num_hidden_layers) || BASE_LAYERS;
+  const hidden = Number(cfg?.hidden_size) || BASE_HIDDEN;
+  _bytesPerItemTokenSq = BASE_BYTES_PER_ITEM_TOKEN_SQ * (layers / BASE_LAYERS) * (hidden / BASE_HIDDEN);
+}
+
 /** How many texts of `tokens` length fit one forward pass within the budget. Exported for tests. */
 export function batchLimitFor(tokens: number): number {
-  const fit = Math.floor(EMBED_BUDGET_BYTES / (BYTES_PER_ITEM_TOKEN_SQ * tokens * tokens));
+  const fit = Math.floor(EMBED_BUDGET_BYTES / (_bytesPerItemTokenSq * tokens * tokens));
   return Math.min(BATCH_SIZE, Math.max(1, fit));
 }
 
@@ -131,9 +173,13 @@ function tokenLength(embedder: any, text: string): number {
 export async function embedBatch(
   texts: string[],
   onProgress?: (i: number, total: number) => void,
+  kind: EmbedKind = "passage",
 ): Promise<number[][]> {
   if (texts.length === 0) return [];
   const embedder = await getEmbedder();
+  calibrate(embedder);
+  const prefix = prefixFor(_pipelineModel ?? "", kind);
+  if (prefix) texts = texts.map(t => prefix + t);
   const results: number[][] = new Array(texts.length);
   const lengths = texts.map(t => tokenLength(embedder, t));
 

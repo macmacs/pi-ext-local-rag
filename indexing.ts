@@ -1,8 +1,7 @@
 import { basename } from "node:path";
 import Database from "better-sqlite3";
 import { getDbConn, type IndexStats } from "./db.ts";
-import { EMBEDDING_MODEL } from "./constants.ts";
-import { embedBatch } from "./embed.ts";
+import { embedBatch, activeEmbeddingModel } from "./embed.ts";
 import { chunkText, extractText, sha256 } from "./chunking.ts";
 import * as repo from "./repository.ts";
 
@@ -54,6 +53,17 @@ export async function indexFiles(
   try {
     if (total === 0) {
       return { indexed: 0, chunks: 0, skipped: 0, durationMs: Date.now() - startMs };
+    }
+
+    // Vectors from a different model share no coordinate system with the
+    // current one, so a stale `embedded` flag would leave the index quietly
+    // mixing incomparable embeddings. Treat a model change as a forced rebuild.
+    const activeModel = activeEmbeddingModel();
+    const storedModel = repo.getMetadata(database, repo.MetadataKey.EmbeddingModel);
+    if (storedModel && storedModel !== activeModel) {
+      stderrProgress(`[rag] embedding model changed (${storedModel} -> ${activeModel}); re-embedding everything\n`);
+      repo.clearAllVectors(database);
+      force = true;
     }
 
     // Phase 1: parallel read + chunk; DB ops on main thread
@@ -196,7 +206,7 @@ export async function indexFiles(
     if (!hadCallbacks) process.stderr.write(`\r\x1b[2K`);
     progress?.onSave?.();
     repo.setMetadata(database, repo.MetadataKey.LastBuild, new Date().toISOString());
-    repo.setMetadata(database, repo.MetadataKey.EmbeddingModel, EMBEDDING_MODEL);
+    repo.setMetadata(database, repo.MetadataKey.EmbeddingModel, activeModel);
 
     return { indexed: toIndex.length, chunks: chunked, skipped, durationMs: Date.now() - startMs };
   } finally {

@@ -3,7 +3,13 @@
 export const RST = "\x1b[0m", B = "\x1b[1m", D = "\x1b[2m";
 export const GREEN = "\x1b[32m", YELLOW = "\x1b[33m", CYAN = "\x1b[36m", RED = "\x1b[31m", MAGENTA = "\x1b[35m";
 
-export const EMBEDDING_MODEL = "Xenova/all-MiniLM-L6-v2";
+// Retrieval-trained and multilingual (100+ languages), 384-dim so it stays
+// schema-compatible with earlier indexes. Costs ~113 MB and roughly 2x the
+// embed time of the older English-only all-MiniLM-L6-v2, and is worth it:
+// on a German corpus it more than doubled vector MRR (0.333 -> 0.683).
+// Changing this invalidates stored vectors; indexFiles detects that and
+// re-embeds automatically.
+export const EMBEDDING_MODEL = "Xenova/multilingual-e5-small";
 export const VECTOR_DIM = 384;
 
 export const DEFAULT_TEXT_EXTS = [

@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { configFile, getRagDir } from "./store.ts";
-import { DEFAULT_TEXT_EXTS } from "./constants.ts";
+import { DEFAULT_TEXT_EXTS, EMBEDDING_MODEL } from "./constants.ts";
 
 /**
  * Gitignore-style patterns excluded from indexing by default. These match
@@ -33,6 +33,7 @@ export interface RagConfig {
   trackedPaths: string[];      // absolute paths previously passed to /rag index
   excludePatterns: string[];   // gitignore-style path patterns
   ocrLanguages: string[];      // tesseract langs for scanned PDFs, best match first (e.g. ["deu", "eng"])
+  embeddingModel: string;      // Transformers.js feature-extraction model; changing it forces a re-embed
 }
 
 export function defaultConfig(): RagConfig {
@@ -50,6 +51,9 @@ export function defaultConfig(): RagConfig {
     // your documents are actually in; entries with no installed traineddata
     // are dropped.
     ocrLanguages: ["eng"],
+    // Any change here invalidates stored vectors and triggers a full re-embed.
+    // Must be a 384-dim model unless VECTOR_DIM changes too.
+    embeddingModel: EMBEDDING_MODEL,
   };
 }
 

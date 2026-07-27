@@ -56,7 +56,7 @@ export async function hybridSearch(
   const ftsResults = repo.searchFts(database, ftsQuery, ftsLimit);
 
   // Vector via sqlite-vec
-  const queryVec = await embed(query);
+  const queryVec = await embed(query, "query");
   const vecLimit = Math.max(limit * 10, 100);
   const vecResults = repo.searchVectors(database, queryVec, vecLimit);
 

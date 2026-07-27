@@ -968,6 +968,7 @@ describe("Storage (loadConfig/saveConfig/loadIndex/saveIndex/ensureDir)", () => 
     expect(cfg.trackedPaths).toEqual([]);
     expect(cfg.excludePatterns).toContain("**/package-lock.json");
     expect(cfg.ocrLanguages).toEqual(["eng"]);
+    expect(cfg.embeddingModel).toBe("Xenova/multilingual-e5-small");
   });
 
   it("saveConfig / loadConfig round-trip persists every field", () => {
@@ -981,6 +982,7 @@ describe("Storage (loadConfig/saveConfig/loadIndex/saveIndex/ensureDir)", () => 
       trackedPaths: ["/tmp/proj-a", "/tmp/proj-b"],
       excludePatterns: ["*.log", "node_modules/"],
       ocrLanguages: ["deu", "eng"],
+      embeddingModel: "Xenova/all-MiniLM-L6-v2",
     };
     saveConfig(written);
     expect(loadConfig()).toEqual(written);
