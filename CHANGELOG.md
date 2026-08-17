@@ -1,7 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.5.0
 
+- **Repository moved to `github.com/macmacs/pi-ext-local-rag`**; `repository`, `homepage`, and `bugs` in `package.json` and the install instructions now point there.
 - **Fixed: a malformed PDF could kill the host agent process.** pdfjs rejects detached promises for per-page and per-XObject parse tasks that `pdf-parse` never awaits, so a corrupt content stream crashed the process with `FormatError: bad XRef entry` (or `Bad encoding in flate stream`) even though `extractText` already ran inside a `try`/`catch`. `extractText` now installs a scoped `unhandledRejection` guard for the duration of a parse that drops pdfjs-originated rejections and rethrows everything else, so genuine host bugs still crash as before.
 - **Fixed: valid PDFs under ~64 KB failed with "bad XRef entry".** pdfjs resolves its sub-streams against `bytes.buffer` without honouring `byteOffset`, so a Node `Buffer` allocated from the shared pool made it read object data out of a neighbouring buffer. `extractText` now passes a standalone `Uint8Array`.
 - **PDFs that fail to parse fall through to OCR** instead of being dropped from the index, and report the real parser message rather than "not found or unreadable".
