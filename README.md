@@ -139,6 +139,16 @@ The extension registers three tools the agent can call directly:
 3. **Auto-inject** — before every agent turn, the user's prompt is searched against the index and relevant chunks are appended after the prompt as a hidden `customType: "rag"` message (KV-cache friendly — the system prompt is unchanged across turns).
 4. **Auto-refresh** — if the index is older than 24 h, the `before_agent_start` hook re-walks tracked paths and re-indexes new/changed files in the background. Throttled to one stale check per hour.
 
+## When not to use RAG
+
+Retrieval ranks, it does not enumerate. Some lookups are structurally outside what similarity search can do, and pointing this extension at them produces confident, incomplete answers:
+
+- **"List everything that matches X"** - `topK` plus a score threshold means completeness is never guaranteed. The 6th matching item falls off the list. Set membership is not a relevance question.
+- **Date or number ranges** ("due on or before 2026-08-24", "invoices over 500 EUR") - these are comparisons. No amount of semantic matching does them reliably.
+- **Terse lines inside prose** - a one-line `- [ ] ...` item gets averaged into a chunk dominated by its surroundings, so its vector barely responds to the query. BM25 helps here, but only if the query happens to share literal tokens.
+
+For those, write deterministic code: `grep`, a SQL query, or a small script that filters exactly and returns every match. Wiring it into a pi extension that runs `before_agent_start` also makes the behaviour model-independent, rather than hoping the agent picks the right tool. Use RAG for "where is something about X", not for "what is the complete set of X".
+
 ## Storage
 
 Index data lives in `rag.db` (SQLite, WAL mode, with FTS5 + sqlite-vec extensions loaded). Three resolution rules:
