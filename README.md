@@ -16,13 +16,7 @@ Local hybrid RAG pipeline for the [Pi coding agent](https://github.com/badlogic/
 ## Install
 
 ```bash
-pi install npm:pi-local-rag
-```
-
-Or via git:
-
-```bash
-pi install git:github.com/vahidkowsari/pi-local-rag
+pi install git:github.com/macmacs/pi-ext-local-rag
 ```
 
 Optional: install `pdftoppm` (poppler) + `tesseract` with traineddata for the languages your documents are in (see `ocrLanguages`) to enable OCR fallback for image-only PDFs.
