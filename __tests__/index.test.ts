@@ -819,6 +819,35 @@ describe("hybridSearch (BM25 via FTS5, no vectors)", () => {
     }
   });
 
+  it("multi-word query: terms are OR-joined, not AND-joined", async () => {
+    // The terms deliberately do not co-occur in a single chunk. With the FTS5
+    // default (space = implicit AND) this matched nothing, bm25 stayed 0 and
+    // hybrid search silently degraded to vector-only.
+    const db = createTestDb([
+      { file: "/src/a.ts", content: "alpha beta" },
+      { file: "/src/b.ts", content: "gamma delta" },
+    ]);
+    const results = await hybridSearch("alpha delta", 10, 1.0, db);
+    db.close();
+    expect(results.length).toBe(2);
+    expect(results.every(r => r.bm25 > 0)).toBe(true);
+  });
+
+  it("bm25 normalization keeps the better FTS match on top", async () => {
+    // SQLite's bm25() is negative and lower-is-better, so normalizing it the
+    // naive min-max way ranks the *worst* candidate first.
+    const db = createTestDb([
+      { file: "/src/a.ts", content: "alpha beta gamma" },
+      { file: "/src/b.ts", content: "gamma delta epsilon" },
+    ]);
+    // (Only the top candidate survives here: min-max normalizes the weaker of
+    // two FTS hits to 0, and with no vectors that leaves hybrid = 0.)
+    const results = await hybridSearch("alpha gamma", 10, 1.0, db);
+    db.close();
+    expect(results[0].chunk.content).toBe("alpha beta gamma");
+    expect(results[0].bm25).toBe(1);
+  });
+
   it("filename boost: first query term matching filename scores higher", async () => {
     const db = createTestDb([
       { file: "/src/auth module", content: "export function login for user verification" },

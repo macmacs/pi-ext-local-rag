@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.1
+
+- **Fixed: hybrid search silently ran vector-only for multi-word queries.** `hybridSearch` joined the per-term FTS5 phrases with a space, which FTS5 reads as an implicit AND, so a chunk had to contain *every* query term. Natural-language queries almost never satisfy that, `searchFts` returned nothing, and every result came back with `bm25: 0.000` and `hybrid = (1 - alpha) x vector`. Terms are now OR-joined; `bm25()` still ranks chunks matching more (and rarer) terms higher. Empty tokens are dropped so a blank query no longer builds a malformed `""` match expression.
+- **Fixed: BM25 normalization inverted the ranking.** SQLite's `bm25()` returns negative scores where a better match is more negative, but the min-max normalization mapped the lowest (= best) score to 0 and the worst to 1. This was invisible while the AND-join kept the FTS result set empty or single-row; with the OR-join it put the weakest keyword match on top. Normalization is now inverted to match `bm25()`'s sign.
+- Note on tuning: with BM25 actually contributing, hybrid scores span the full 0-1 range instead of being capped at `1 - alpha` (0.6 by default), so the `ragScoreThreshold` default of `0.35` is effectively more permissive than before.
+- **Docs**: new "When not to use RAG" section - set-membership, date/number-range and enumeration lookups belong in deterministic code (grep/SQL/a script), not in similarity search.
+
 ## 0.5.0
 
 - **Repository moved to `github.com/macmacs/pi-ext-local-rag`**; `repository`, `homepage`, and `bugs` in `package.json` and the install instructions now point there.

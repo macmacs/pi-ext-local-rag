@@ -50,10 +50,16 @@ export async function hybridSearch(
   // Fast existence check — LIMIT 1 avoids full table scan
   if (!repo.hasAnyChunks(database)) return [];
 
-  // BM25 via FTS5 — cap candidates to avoid scanning entire index
-  const ftsQuery = query.split(/\s+/).map(t => `"${t.replace(/"/g, '""')}"`).join(" ");
+  // BM25 via FTS5 — cap candidates to avoid scanning entire index.
+  // Terms are OR-joined: a space in an FTS5 query is an implicit AND, so a
+  // multi-word natural-language query would only match chunks containing every
+  // term - almost never true, which silently reduced hybrid search to
+  // vector-only. OR keeps the keyword arm recall-oriented; bm25() still ranks
+  // chunks matching more (and rarer) terms higher.
+  const ftsTerms = query.split(/\s+/).filter(t => t.length > 0);
+  const ftsQuery = ftsTerms.map(t => `"${t.replace(/"/g, '""')}"`).join(" OR ");
   const ftsLimit = Math.max(limit * 20, 200);
-  const ftsResults = repo.searchFts(database, ftsQuery, ftsLimit);
+  const ftsResults = ftsQuery ? repo.searchFts(database, ftsQuery, ftsLimit) : [];
 
   // Vector via sqlite-vec
   const queryVec = await embed(query, "query");
@@ -76,7 +82,10 @@ export async function hybridSearch(
   const distances = vecResults.map(r => r.distance);
   const hasVectors = distances.length > 0;
 
-  // Normalize BM25
+  // Normalize BM25. SQLite's bm25() returns *negative* scores where a better
+  // match is more negative (hence `ORDER BY bm25()` ascending in searchFts), so
+  // the best score is the minimum: min-max normalization has to be inverted to
+  // map it to 1 rather than 0.
   const bm25NormMap = new Map<number, number>();
   if (hasBm25) {
     const bm25Max = Math.max(...bm25Scores);
@@ -88,7 +97,7 @@ export async function hybridSearch(
       }
     } else {
       for (const r of ftsResults) {
-        bm25NormMap.set(r.rowid, (r.bm25_score - bm25Min) / bm25Range);
+        bm25NormMap.set(r.rowid, (bm25Max - r.bm25_score) / bm25Range);
       }
     }
   }
