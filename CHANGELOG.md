@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.3
+
+- **Fixed: every refresh re-extracted (and re-OCR'd) unchanged files.** `indexFiles` called `extractText` on every path and only *then* compared the content hash against the index, so a scanned PDF paid the full pdftoppm + tesseract cost on every single run just to be discarded as "skipped". The hash now comes from `fileIdentity`, which reads the bytes without decoding them; extraction only happens for files that are actually new, changed, or forced.
+- **OCR results are cached** in `<ragDir>/ocr/<content-hash>-<langs>.txt`, so `/rag rebuild --force` and embedding-model changes no longer re-OCR documents that have not changed. Changing `ocrLanguages` misses the cache and re-OCRs by design; empty results are not cached so a failed render is retried.
+- Packaging: `repository.ts` was missing from `files` in `package.json`, so the published tarball shipped without the module every SQL call goes through.
+
 ## 0.5.2
 
 - **Default `ocrLanguages` is now `["eng", "deu"]`** (was `["eng"]`), so German scans keep their umlauts out of the box. Entries without installed traineddata are still dropped, so an English-only tesseract install behaves as before.

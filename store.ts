@@ -70,6 +70,8 @@ export function legacyIndexFile(ragDir: string): string { return join(ragDir, "i
 /** @deprecated use dbFile/legacyIndexFile. Kept temporarily for callers that still reach for the JSON path. */
 export function indexFile(ragDir: string): string { return join(ragDir, "index.json"); }
 export function configFile(ragDir: string): string { return join(ragDir, "config.json"); }
+/** OCR results cached by content hash, so a re-index never re-runs tesseract on unchanged scans. */
+export function ocrCacheDir(ragDir: string): string { return join(ragDir, "ocr"); }
 
 export function ensureDir(ragDir: string) {
   if (existsSync(ragDir)) return;

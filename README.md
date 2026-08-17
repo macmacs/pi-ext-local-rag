@@ -161,6 +161,8 @@ Index data lives in `rag.db` (SQLite, WAL mode, with FTS5 + sqlite-vec extension
 
 Legacy `~/.pi/lens/` directories are renamed to `~/.pi/rag/` on first run; legacy `index.json` files are migrated into `rag.db` and removed.
 
+OCR output is cached next to the index in `<ragDir>/ocr/<content-hash>-<langs>.txt`. The same bytes under the same languages always OCR to the same text, so a rebuild, a `--force` run or an embedding-model change never re-runs tesseract on a document it has already read. Changing `ocrLanguages` misses the cache and re-OCRs, which is the point. Delete the directory to force a fresh pass.
+
 ## Configuration
 
 Auto-injection is on by default. Config lives in `<ragDir>/config.json`:

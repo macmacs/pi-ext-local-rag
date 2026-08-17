@@ -1,11 +1,12 @@
-import { existsSync, readFileSync, readdirSync, statSync, mkdtempSync, rmSync, writeFileSync, promises as fsPromises } from "node:fs";
-import { extname, basename, join, relative } from "node:path";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, mkdtempSync, rmSync, writeFileSync, promises as fsPromises } from "node:fs";
+import { extname, basename, dirname, join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import ignore from "ignore";
 import { BINARY_DOC_EXTS, TEXT_MAX_BYTES, BINARY_DOC_MAX_BYTES, SKIP_DIRS } from "./constants.ts";
 import { loadConfig, resolveExtensions, type RagConfig } from "./config.ts";
+import { getRagDir, ocrCacheDir } from "./store.ts";
 
 const yield_ = () => new Promise<void>(r => setTimeout(r, 0));
 
@@ -323,6 +324,34 @@ export function getOcrTooling(): OcrTooling {
   return (_ocrTooling = { available: true, langs: wanted.join("+") });
 }
 
+/**
+ * OCR is by far the most expensive thing the indexer does - minutes per scanned
+ * document - and its input is immutable: the same bytes under the same
+ * languages always produce the same text. Results are therefore cached on disk
+ * under the rag dir, keyed by content hash + language chain, so a forced
+ * rebuild, an embedding-model change or a fresh index never re-runs tesseract
+ * on a document it has already read. Changing `ocrLanguages` misses the cache
+ * and re-OCRs, which is the intended behaviour.
+ */
+function ocrCachePath(hash: string, langs: string): string {
+  return join(ocrCacheDir(getRagDir()), `${hash}-${langs.replace(/\+/g, "_")}.txt`);
+}
+
+function readOcrCache(hash: string, langs: string): string | undefined {
+  try {
+    const p = ocrCachePath(hash, langs);
+    return existsSync(p) ? readFileSync(p, "utf-8") : undefined;
+  } catch { return undefined; }
+}
+
+function writeOcrCache(hash: string, langs: string, text: string): void {
+  try {
+    const p = ocrCachePath(hash, langs);
+    mkdirSync(dirname(p), { recursive: true });
+    writeFileSync(p, text, "utf-8");
+  } catch { /* cache is an optimization; a failure to write is not fatal */ }
+}
+
 /** Render `buf` to PNGs via pdftoppm, OCR each page via tesseract, return concatenated text. */
 async function ocrPdf(buf: Buffer, langs: string, label: string): Promise<string> {
   const MAX_PAGES = 200;
@@ -361,6 +390,23 @@ export function isSparsePdfText(text: string, numpages: number): boolean {
   return text.trim().length < 50 * Math.max(1, numpages);
 }
 
+// Identity of a file as stored in the `files` table. Kept in one place so
+// `extractText` and `fileIdentity` can never drift apart - the indexer compares
+// one against the other to decide whether a file needs re-reading at all.
+const binaryIdentity = (buf: Buffer) => ({ hash: sha256(buf.toString("binary")), size: buf.length });
+const textIdentity = (raw: string) => ({ hash: sha256(raw), size: raw.length });
+
+/**
+ * Hash and size of a file without decoding it - the same values `extractText`
+ * returns, for a fraction of the cost. The indexer calls this first so an
+ * unchanged PDF is skipped before anything pays for pdfjs or OCR.
+ */
+export function fileIdentity(fp: string): { hash: string; size: number } {
+  const ext = extname(fp).toLowerCase();
+  if (BINARY_DOC_EXTS.has(ext)) return binaryIdentity(readFileSync(fp));
+  return textIdentity(readFileSync(fp, "utf-8"));
+}
+
 /**
  * Read and decode a file into UTF-8 text. PDF and DOCX are routed through
  * extraction libraries; everything else is read as plain UTF-8. Hash is
@@ -390,10 +436,15 @@ export async function extractText(fp: string): Promise<{ text: string; hash: str
       data = { text: "", numpages: 1 };
     }
     let text = data.text;
+    const identity = binaryIdentity(buf);
     if (isSparsePdfText(text, data.numpages ?? 1)) {
       const tools = getOcrTooling();
       if (tools.available) {
-        const ocr = await ocrPdf(buf, tools.langs, basename(fp));
+        const cached = readOcrCache(identity.hash, tools.langs);
+        const ocr = cached ?? await ocrPdf(buf, tools.langs, basename(fp));
+        // Only a non-empty result is worth keeping: an empty one means pdftoppm
+        // or tesseract failed, and that is worth retrying on the next run.
+        if (cached === undefined && ocr.trim()) writeOcrCache(identity.hash, tools.langs, ocr);
         if (ocr.trim().length > text.trim().length) text = ocr;
       } else if (!_ocrUnavailableLogged) {
         _ocrUnavailableLogged = true;
@@ -402,13 +453,13 @@ export async function extractText(fp: string): Promise<{ text: string; hash: str
         );
       }
     }
-    return { text, hash: sha256(buf.toString("binary")), size: buf.length };
+    return { text, ...identity };
   }
   if (ext === ".docx") {
     const buf = readFileSync(fp);
     const { default: mammoth } = await import("mammoth");
     const { value } = await mammoth.extractRawText({ buffer: buf });
-    return { text: value, hash: sha256(buf.toString("binary")), size: buf.length };
+    return { text: value, ...binaryIdentity(buf) };
   }
   if (ext === ".html" || ext === ".htm") {
     const { default: TurndownService } = await import("turndown");
@@ -421,8 +472,8 @@ export async function extractText(fp: string): Promise<{ text: string; hash: str
     td.remove(["script", "style"]);
     td.remove(["nav", "footer"]);
     const text = td.turndown(raw);
-    return { text, hash: sha256(raw), size: raw.length };
+    return { text, ...textIdentity(raw) };
   }
   const text = readFileSync(fp, "utf-8");
-  return { text, hash: sha256(text), size: text.length };
+  return { text, ...textIdentity(text) };
 }

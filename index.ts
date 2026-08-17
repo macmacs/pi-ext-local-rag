@@ -54,14 +54,14 @@ import { indexFiles, isIndexStale } from "./indexing.ts";
 // Re-export the public surface so existing consumers of `pi-local-rag` keep
 // working (tests, downstream code that imports from the package root).
 export { DEFAULT_TEXT_EXTS } from "./constants.ts";
-export { getRagDir, GLOBAL_RAG_DIR, LEGACY_DIR } from "./store.ts";
+export { getRagDir, ocrCacheDir, GLOBAL_RAG_DIR, LEGACY_DIR } from "./store.ts";
 export type { RagConfig } from "./config.ts";
 export { loadConfig, saveConfig, defaultConfig, normalizeExt, resolveExtensions } from "./config.ts";
 export type { Chunk, IndexMeta, IndexStats } from "./db.ts";
 export { openDb, getDb, getDbConn, getFreshDbConn, closeDbConn, loadIndex, saveIndex, getIndexStats, initSchema, float32ToBuffer } from "./db.ts";
 export {
   sha256, chunkText, collectFiles, collectFilesAsync, collectFromTracked, collectFromTrackedAsync,
-  isExcludedByConfig, extractText, getOcrTooling, isSparsePdfText,
+  isExcludedByConfig, extractText, fileIdentity, getOcrTooling, isSparsePdfText,
 } from "./chunking.ts";
 export { embed, embedBatch } from "./embed.ts";
 export type { ScoredChunk } from "./search.ts";

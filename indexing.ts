@@ -2,7 +2,7 @@ import { basename } from "node:path";
 import Database from "better-sqlite3";
 import { getDbConn, type IndexStats } from "./db.ts";
 import { embedBatch, activeEmbeddingModel } from "./embed.ts";
-import { chunkText, extractText, sha256 } from "./chunking.ts";
+import { chunkText, extractText, fileIdentity, sha256 } from "./chunking.ts";
 import * as repo from "./repository.ts";
 
 export interface ProgressCallbacks {
@@ -70,7 +70,9 @@ export async function indexFiles(
     const CONCURRENCY = 32;
     const YIELD_INTERVAL = 64;
 
-    interface ReadResult { fp: string; hash: string; size: number; raw: { content: string; lineStart: number; lineEnd: number }[] }
+    // `raw: null` marks a file whose hash already matches the index — it is
+    // counted as skipped without ever being decoded.
+    interface ReadResult { fp: string; hash: string; size: number; raw: { content: string; lineStart: number; lineEnd: number }[] | null }
 
     const readQueue: ReadResult[] = [];
     let readQueueDone = false;
@@ -89,7 +91,18 @@ export async function indexFiles(
           const i = pathsIdx++;
           if (i >= paths.length) { producersDone++; if (producersDone >= workerCount) { readQueueDone = true; notifyRead(); } return; }
           try {
-            const { text, hash, size } = await extractText(paths[i]);
+            // Decide on the cheap identity FIRST. Decoding is what makes a
+            // refresh expensive - a scanned PDF costs minutes of OCR - and
+            // doing it before the skip check meant every unchanged file paid
+            // that price on every single refresh only to be thrown away.
+            const { hash, size } = fileIdentity(paths[i]);
+            const known = force ? undefined : repo.getFile(database, paths[i]);
+            if (known?.hash === hash && known?.embedded) {
+              readQueue.push({ fp: paths[i], hash, size, raw: null });
+              notifyRead();
+              continue;
+            }
+            const { text } = await extractText(paths[i]);
             const raw = chunkText(text);
             readQueue.push({ fp: paths[i], hash, size, raw });
             notifyRead();
@@ -112,8 +125,8 @@ export async function indexFiles(
         processedCount++;
         const name = basename(r.fp);
 
-        const existing = repo.getFile(database, r.fp);
-        if (!force && existing?.hash === r.hash && existing?.embedded) {
+        const existing = r.raw === null ? undefined : repo.getFile(database, r.fp);
+        if (r.raw === null || (!force && existing?.hash === r.hash && existing?.embedded)) {
           skipped++;
           progress?.onFile?.(processedCount, total, name, skipped);
           continue;

@@ -49,6 +49,8 @@ import {
   collectFromTracked,
   isExcludedByConfig,
   extractText,
+  fileIdentity,
+  ocrCacheDir,
   hybridSearch,
   sha256,
   initSchema,
@@ -529,6 +531,74 @@ describe("indexFiles --force", () => {
       rmSync(proj, { recursive: true, force: true });
     }
   });
+
+  // Decoding is what makes a refresh expensive - a scanned PDF costs minutes of
+  // OCR - so an unchanged file must be skipped before extractText is ever
+  // called, not after.
+  it("skips unchanged files without decoding them", async () => {
+    const proj = mkdtempSync(join(tmpdir(), "rag-skip-proj-"));
+    const extracted: string[] = [];
+    try {
+      vi.resetModules();
+      vi.doMock("../chunking.ts", async (importOriginal) => {
+        const actual = await importOriginal<typeof import("../chunking.ts")>();
+        return {
+          ...actual,
+          extractText: (fp: string) => { extracted.push(fp); return actual.extractText(fp); },
+        };
+      });
+      const spied = await import("../index.ts");
+
+      const fp = join(proj, "doc.pdf");
+      writeFileSync(fp, SAMPLE_PDF);
+      expect((await spied.indexFiles([fp])).indexed).toBe(1);
+      expect(extracted).toEqual([fp]);
+
+      const r = await spied.indexFiles([fp]);
+      expect(r.skipped).toBe(1);
+      expect(r.indexed).toBe(0);
+      expect(extracted).toEqual([fp]); // still one call: no second decode
+
+      // force re-reads, cheap hash or not.
+      await spied.indexFiles([fp], undefined, undefined, true);
+      expect(extracted).toEqual([fp, fp]);
+    } finally {
+      vi.doUnmock("../chunking.ts");
+      vi.resetModules();
+      rmSync(proj, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("fileIdentity", () => {
+  let tmp: string;
+  beforeEach(() => { tmp = mkdtempSync(join(tmpdir(), "rag-ident-")); });
+  afterEach(() => { rmSync(tmp, { recursive: true, force: true }); });
+
+  it("matches what extractText reports, for text, HTML and PDF", async () => {
+    const cases = [
+      ["note.md", "# Title\n\nbody text\n"],
+      ["page.html", "<h1>Title</h1><p>body</p>"],
+    ] as const;
+    for (const [name, content] of cases) {
+      const fp = join(tmp, name);
+      writeFileSync(fp, content);
+      const full = await extractText(fp);
+      expect(fileIdentity(fp)).toEqual({ hash: full.hash, size: full.size });
+    }
+    const pdf = join(tmp, "doc.pdf");
+    writeFileSync(pdf, SAMPLE_PDF);
+    const full = await extractText(pdf);
+    expect(fileIdentity(pdf)).toEqual({ hash: full.hash, size: full.size });
+  });
+
+  it("changes when the file changes", () => {
+    const fp = join(tmp, "note.md");
+    writeFileSync(fp, "one");
+    const a = fileIdentity(fp);
+    writeFileSync(fp, "two");
+    expect(fileIdentity(fp).hash).not.toBe(a.hash);
+  });
 });
 
 // ─── extractText (plain / PDF / DOCX / HTML) ────────────────────────────────
@@ -753,6 +823,33 @@ describe.skipIf(!ocrTools.available)("OCR end-to-end", () => {
     const { text } = await extractText(fp);
     expect(text).toMatch(/OcrMarker/);
   }, 60_000);
+
+  it("caches the OCR text by content hash and reuses it", async () => {
+    const ragDir = mkdtempSync(join(tmpdir(), "rag-ocr-cache-"));
+    const savedRagDir = process.env.PI_RAG_DIR;
+    process.env.PI_RAG_DIR = ragDir;
+    try {
+      const fp = join(tmp, "cached.pdf");
+      writeFileSync(fp, SAMPLE_IMAGE_PDF);
+      const first = await extractText(fp);
+      expect(first.text).toMatch(/OcrMarker/);
+
+      const langs = ocrTools.available ? ocrTools.langs : "";
+      const cacheFile = join(ocrCacheDir(ragDir), `${first.hash}-${langs.replace(/\+/g, "_")}.txt`);
+      expect(existsSync(cacheFile)).toBe(true);
+
+      // Poison the cache: if the second pass returns this, it read the cache
+      // instead of running tesseract again.
+      writeFileSync(cacheFile, "CachedNotOcred ".repeat(20));
+      const second = await extractText(fp);
+      expect(second.text).toMatch(/CachedNotOcred/);
+      expect(second.text).not.toMatch(/OcrMarker/);
+    } finally {
+      if (savedRagDir !== undefined) process.env.PI_RAG_DIR = savedRagDir;
+      else delete process.env.PI_RAG_DIR;
+      rmSync(ragDir, { recursive: true, force: true });
+    }
+  }, 120_000);
 });
 
 // ─── hybridSearch (FTS5 BM25 + sqlite-vec) ──────────────────────────────────
