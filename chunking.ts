@@ -310,7 +310,7 @@ export function getOcrTooling(): OcrTooling {
   const have = new Set(out.split(/\r?\n/).map(s => s.trim()).filter(Boolean));
 
   let configured: string[];
-  try { configured = loadConfig().ocrLanguages; } catch { configured = ["eng"]; }
+  try { configured = loadConfig().ocrLanguages; } catch { configured = ["eng", "deu"]; }
   const wanted = configured.filter(l => have.has(l));
   if (!wanted.length) {
     if (configured.length && have.size) {

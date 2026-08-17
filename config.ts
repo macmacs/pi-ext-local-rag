@@ -50,7 +50,7 @@ export function defaultConfig(): RagConfig {
     // ligatures come out as noise under `-l eng`). Set this to the languages
     // your documents are actually in; entries with no installed traineddata
     // are dropped.
-    ocrLanguages: ["eng"],
+    ocrLanguages: ["eng", "deu"],
     // Any change here invalidates stored vectors and triggers a full re-embed.
     // Must be a 384-dim model unless VECTOR_DIM changes too.
     embeddingModel: EMBEDDING_MODEL,

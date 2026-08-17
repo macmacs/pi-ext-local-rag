@@ -996,7 +996,7 @@ describe("Storage (loadConfig/saveConfig/loadIndex/saveIndex/ensureDir)", () => 
     expect(cfg.excludeExtensions).toEqual([]);
     expect(cfg.trackedPaths).toEqual([]);
     expect(cfg.excludePatterns).toContain("**/package-lock.json");
-    expect(cfg.ocrLanguages).toEqual(["eng"]);
+    expect(cfg.ocrLanguages).toEqual(["eng", "deu"]);
     expect(cfg.embeddingModel).toBe("Xenova/multilingual-e5-small");
   });
 

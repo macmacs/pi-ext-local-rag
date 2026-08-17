@@ -175,7 +175,7 @@ Auto-injection is on by default. Config lives in `<ragDir>/config.json`:
 | `excludeExtensions` | `[]` | Default extensions to skip |
 | `trackedPaths` | `[]` | Absolute paths that `/rag rebuild`/`refresh` re-walk |
 | `excludePatterns` | lock files, `*.min.js/css`, `*.map` | Gitignore-style patterns skipped when walking. Seeded with machine-generated noise (e.g. `package-lock.json`) so it never pollutes search. Add more with `/rag exclude <pattern>`. |
-| `ocrLanguages` | `["eng"]` | Tesseract languages for scanned PDFs, best match first (e.g. `["deu", "eng"]`). Getting this wrong is expensive: German scans OCR'd as English lose every umlaut. Needs the matching traineddata installed (`apt install tesseract-ocr-deu`); entries without it are dropped. |
+| `ocrLanguages` | `["eng", "deu"]` | Tesseract languages for scanned PDFs, best match first (e.g. `["deu", "eng"]` for a German-first archive). Getting this wrong is expensive: German scans OCR'd as English lose every umlaut. Needs the matching traineddata installed (`apt install tesseract-ocr-deu`); entries without it are dropped. |
 | `embeddingModel` | `Xenova/multilingual-e5-small` | Transformers.js feature-extraction model. Changing it invalidates every stored vector, so the next index run wipes and re-embeds automatically. See below. |
 
 ### Choosing an embedding model

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.2
+
+- **Default `ocrLanguages` is now `["eng", "deu"]`** (was `["eng"]`), so German scans keep their umlauts out of the box. Entries without installed traineddata are still dropped, so an English-only tesseract install behaves as before.
+
 ## 0.5.1
 
 - **Fixed: hybrid search silently ran vector-only for multi-word queries.** `hybridSearch` joined the per-term FTS5 phrases with a space, which FTS5 reads as an implicit AND, so a chunk had to contain *every* query term. Natural-language queries almost never satisfy that, `searchFts` returned nothing, and every result came back with `bm25: 0.000` and `hybrid = (1 - alpha) x vector`. Terms are now OR-joined; `bm25()` still ranks chunks matching more (and rarer) terms higher. Empty tokens are dropped so a blank query no longer builds a malformed `""` match expression.
