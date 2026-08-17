@@ -76,7 +76,7 @@ $ /rag status
   Last build:       2026-05-26T20:14:03.221Z
   Storage:          /Users/you/code/my-app/.pi/rag (project)
 
-  RAG injection:    enabled  topK=5  threshold=0.1  alpha=0.4
+  RAG injection:    enabled  topK=5  threshold=0.35  alpha=0.4
 
   File types:
     .ts    231
@@ -192,6 +192,12 @@ Environment overrides:
 |---|---|---|
 | `PI_RAG_DIR` / `PI_RAG_LEGACY_DIR` | auto-resolved | Where the index and config live |
 | `PI_RAG_EMBED_BUDGET_MB` | `384` | Memory one embedding forward pass may use. Batch size is derived from it, so lower this on a memory-tight host and raise it on a large one. |
+| `NODE_EXTRA_CA_CERTS` | unset | Standard Node CA override. When set it is respected as-is and the fallback below is skipped. |
+| `SSL_CERT_FILE` | unset | First candidate for the system CA bundle used by that fallback. |
+
+### Model download behind a TLS-intercepting proxy
+
+The first index run downloads the model over Node's `fetch`, which trusts only Node's bundled roots - behind corporate TLS interception that fails with `unable to get local issuer certificate`, surfacing as "fetch failed" and an index with 0% vector coverage. Unless `NODE_EXTRA_CA_CERTS` is already set, the extension additively merges the system CA bundle (`$SSL_CERT_FILE`, then `/etc/ssl/certs/ca-certificates.crt`, `/etc/pki/tls/certs/ca-bundle.crt`, `/etc/ssl/ca-bundle.pem`, `/etc/ssl/cert.pem`) into Node's trust store before the download. Node's own roots are kept. Requires `tls.setDefaultCACertificates` (Node 22+); on older Node it is a no-op, so set `NODE_EXTRA_CA_CERTS` yourself there.
 
 ## Testing
 

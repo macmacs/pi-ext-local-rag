@@ -17,6 +17,8 @@
   - The batch memory constant self-calibrates from the loaded model's depth and width rather than assuming a 6-layer / 384-dim model, so a larger model shrinks batches instead of reintroducing the OOM.
   - Measured on a 1719-chunk German archive (10 labelled lookups, pure vector): `all-MiniLM-L6-v2` MRR 0.333, `paraphrase-multilingual-MiniLM-L12-v2` 0.267, `multilingual-e5-small` 0.683. The multilingual *paraphrase* model is worse than the English-only default - paraphrase training is symmetric, RAG is asymmetric. End to end with BM25, e5-small moves top-3 from 7/10 to 10/10.
 
+- **Docs**: documented the system-CA fallback used for the model download (`NODE_EXTRA_CA_CERTS` / `SSL_CERT_FILE`, Node 22+), which existed in `embed.ts` but appeared nowhere in the README, and corrected the `/rag status` sample output, which still showed the pre-0.4.0 `threshold=0.1` instead of the current default `0.35`.
+
 ### Known environment quirk
 
 On a host whose CPU affinity is restricted (containers, LXC, `taskset`), onnxruntime-node logs `pthread_setaffinity_np failed ... Specify the number of threads explicitly` on the first inference. It is cosmetic - ORT falls back to unpinned threads and inference proceeds normally. It cannot be silenced from JS at onnxruntime-node 1.14: it comes from the global ORT thread pool, and neither `intraOpNumThreads`, `enableCpuMemArena`, `ort.env.logLevel` nor `ORT_LOG_SEVERITY_LEVEL` suppresses it.
@@ -49,7 +51,7 @@ On a host whose CPU affinity is restricted (containers, LXC, `taskset`), onnxrun
 - **Fix**: silence `pdfjs` worker warnings in TUI.
 - **Fix**: FTS5 query escaping for single quotes; split into individual terms.
 
-## Unreleased
+## 0.4.0 (earlier entries)
 
 - **Configurable file extensions** (closes #9): expanded the default list to cover commonly-missing languages (`.cs`, `.tsx`, `.jsx`, `.kt`, `.swift`, `.rb`, `.php`, `.lua`, `.dart`, `.vue`, `.svelte`, `.scala`, `.scss`, `.tf`, `.hcl`, `.mdx`, …) and added `extraExtensions` / `excludeExtensions` to `RagConfig` plus a `/rag ext list|add|remove|reset` subcommand so users can extend the allowlist without forking. Includes 6 new tests for `normalizeExt` and `resolveExtensions`.
 - **Test suite** (38 tests, no dev dependencies — uses `node --test` + `--experimental-strip-types`): covers cosine/normalize math, chunking, file collection against real tmp dirs, BM25 search ranking + phrase boost, storage I/O round-trip + legacy `~/.pi/lens` → `~/.pi/rag` migration, and live embedding/semantic-search against the real ONNX model. The model (`Xenova/all-MiniLM-L6-v2`, ~23 MB) is fetched from HuggingFace on the first run; set `SKIP_EMBEDDING_TESTS=1` to opt out in offline CI. Run with `npm test`.
